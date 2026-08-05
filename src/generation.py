@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
+import torch
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -18,9 +19,10 @@ SYSTEM_PROMPT = (
 def load_model():
     """Carga el modelo y el tokenizer una sola vez por proceso."""
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_NAME, torch_dtype="auto", device_map="auto"
-    )
+        MODEL_NAME, torch_dtype="auto"
+    ).to(device)
     return tokenizer, model
 
 
