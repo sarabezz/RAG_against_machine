@@ -128,7 +128,30 @@ class Rag:
 
     def answer(self, query: str, k: int = 10) -> None:
         """Responde una pregunta unica con contexto recuperado."""
-        print(f"TODO: answer '{query}' con k={k}")
+        from src.generation import generate_answer
+        from src.models import MinimalAnswer, MinimalSource
+        from src.retrieval import load_index, search_index
+
+        retriever = load_index("data/output/index/bm25")
+        results = search_index(retriever, query, k)
+
+        sources = [
+            MinimalSource(
+                file_path=r["file_path"],
+                first_character_index=r["first_character_index"],
+                last_character_index=r["last_character_index"],
+            )
+            for r in results
+        ]
+        answer_text = generate_answer(query, results)
+
+        result = MinimalAnswer(
+            question_id="ad-hoc",
+            question=query,
+            retrieved_sources=sources,
+            answer=answer_text,
+        )
+        print(result.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":
