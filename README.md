@@ -48,7 +48,29 @@ The pipeline works in two phases. First, the source repository is split into mea
     make lint
     ```
    (or `make lint-strict` for stricter mypy checks)
-   
+
+
+## Resources
+### References:
+
+- The 42 subject PDF (en.subject.pdf) — project requirements
+- Hugging Face's official Qwen3-0.6B model card — to confirm how to disable "thinking mode" (enable_thinking=False)
+bm25s library documentation — for indexing and searching (index, save, load, retrieve)
+- Pydantic documentation — for data validation (BaseModel, Field)
+- Python Fire documentation — for building the CLI
+- The vLLM repository (github.com/vllm-project/vllm) — the source data being indexed and queried
+
+### AI usage:
+
+AI (Claude) was used throughout this project as a learning tool and pair-programming partner, since I started with no prior knowledge of RAG theory. Specifically, it was used to:
+
+- Explain core concepts (RAG, chunking, BM25 vs TF-IDF, Pydantic validation, greedy decoding, quantization) step by step with analogies, since I had zero background in the theory.
+- Write and iterate on the code together, section by section, rather than generating the whole project at once — I reviewed and tested every part against the real vLLM repository and real datasets before accepting it.
+- Debug real errors encountered during development (dependency issues, indentation bugs, dtype mismatches, memory crashes from quantization on a low-RAM machine).
+- Give an honest technical opinion when I had to decide between further optimizing the LLM (switching to GGUF/llama.cpp) or accepting current performance and documenting the hardware limitation.
+- Check my understanding through mock interview questions, which revealed gaps I then had to re-learn correctly.
+
+All code was tested and validated by me against the real vLLM 0.10.1 repository and the provided datasets before being included in the final project.
 
 
 
