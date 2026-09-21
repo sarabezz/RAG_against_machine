@@ -1,8 +1,9 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
-import torch
 
+import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 MODEL_NAME = "Qwen/Qwen3-0.6B"
@@ -17,12 +18,16 @@ SYSTEM_PROMPT = (
 
 @lru_cache(maxsize=1)
 def load_model():
-    """Carga el modelo y el tokenizer una sola vez por proceso."""
+    """Carga el modelo una sola vez, aplicando cuantizacion dinamica
+    en CPU para acelerar la generacion."""
+    torch.set_num_threads(4)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME, torch_dtype="auto"
     ).to(device)
+
     return tokenizer, model
 
 
@@ -49,9 +54,9 @@ def build_context(sources: List[Dict[str, Any]],
 
 
 def generate_answer(question: str, sources: List[Dict[str, Any]],
-                     max_new_tokens: int = 150) -> str:
+                     max_new_tokens: int = 60) -> str:
     tokenizer, model = load_model()
-    context = build_context(sources)
+    context = build_context(sources, max_chars=1500)
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -69,10 +74,7 @@ def generate_answer(question: str, sources: List[Dict[str, Any]],
     outputs = model.generate(
         **inputs,
         max_new_tokens=max_new_tokens,
-        temperature=0.7,
-        top_p=0.8,
-        top_k=20,
-        do_sample=True,
+        do_sample=False,
     )
     new_tokens = outputs[0][inputs["input_ids"].shape[-1]:]
     return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()

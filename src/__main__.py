@@ -13,6 +13,7 @@ class Rag:
         from pathlib import Path
 
         from src.ingestion import build_chunks
+        from src.retrieval import build_index
 
         start = time.time()
         chunks = build_chunks(repo_path, max_chunk_size)
@@ -98,14 +99,44 @@ class Rag:
 
         print(f"Guardado en {output_path}")
 
-    def answer_dataset(
-        self,
-        search_results_path: str,
-        save_directory: str = "data/output/answers",
-    ) -> None:
+    def answer_dataset(self, search_results_path: str,
+                        save_directory: str = "data/output/answers"
+                        ) -> None:
         """Genera respuestas a partir de resultados de busqueda."""
-        print(f"TODO: answer_dataset {search_results_path} "
-              f"-> {save_directory}")
+        import json
+        from pathlib import Path
+
+        from tqdm import tqdm
+
+        from src.generation import generate_answer
+        from src.models import (MinimalAnswer, MinimalSource,
+                                 StudentSearchResultsAndAnswer)
+
+        with open(search_results_path, encoding="utf-8") as f:
+            raw = json.load(f)
+
+        answers = []
+        for entry in tqdm(raw["search_results"], desc="Generando respuestas"):
+            sources_raw = entry["retrieved_sources"]
+            answer_text = generate_answer(entry["question"], sources_raw)
+            answers.append(MinimalAnswer(
+                question_id=entry["question_id"],
+                question=entry["question"],
+                retrieved_sources=[MinimalSource(**s) for s in sources_raw],
+                answer=answer_text,
+            ))
+            import gc
+            gc.collect()
+
+        output = StudentSearchResultsAndAnswer(search_results=answers,
+                                                k=raw["k"])
+
+        Path(save_directory).mkdir(parents=True, exist_ok=True)
+        output_path = Path(save_directory) / Path(search_results_path).name
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(output.model_dump_json(indent=2))
+
+        print(f"Guardado en {output_path}")
 
     def evaluate(self, search_results_path: str,
                  ground_truth_path: str) -> None:
