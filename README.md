@@ -73,6 +73,17 @@ AI (Claude) was used throughout this project as a learning tool and pair-program
 All code was tested and validated by me against the real vLLM 0.10.1 repository and the provided datasets before being included in the final project.
 
 
+## System architecture
+
+The pipeline is organized into independent modules, each handling one stage, all tied together by a CLI (`__main__.py`) built with Python Fire:
+
+1. `chunking.py` — splits raw source files (Python and Markdown) into meaningful chunks: functions, classes, and Markdown sections, respecting a maximum chunk size.
+2. `ingestion.py` — walks the entire repository, reads every `.py`/`.md` file, and calls `chunking.py` on each one to produce the full list of chunks.
+3. `retrieval.py` — takes those chunks, builds a BM25 index from them (`build_index`), and later loads that index to search it (`search_index`) given a question.
+4. `models.py` — defines the Pydantic schemas (`MinimalSource`, `MinimalSearchResults`, `MinimalAnswer`, etc.) that structure the data passed between every stage, and validate it.
+5. `generation.py` — given a question and the retrieved chunks, builds a prompt (with the chunk text as context) and calls the Qwen3-0.6B language model to generate the final answer.
+6. `evaluation.py` — compares retrieved sources against the ground-truth dataset to compute recall@k metrics.
+7. `__main__.py` — exposes all of the above as CLI commands (`index`, `search`, `search_dataset`, `answer`, `answer_dataset`, `evaluate`), orchestrating the full flow: raw files → chunks → BM25 index → retrieved sources → generated answer → evaluation.
 
 
 
