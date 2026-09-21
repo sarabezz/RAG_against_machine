@@ -86,10 +86,87 @@ The pipeline is organized into independent modules, each handling one stage, all
 7. `__main__.py` — exposes all of the above as CLI commands (`index`, `search`, `search_dataset`, `answer`, `answer_dataset`, `evaluate`), orchestrating the full flow: raw files → chunks → BM25 index → retrieved sources → generated answer → evaluation.
 
 
+## Chunking strategy
+
+Python files are parsed with the `ast` module. Each top-level function, async function, or class definition becomes its own chunk, since these are the most semantically meaningful units in code. Any "loose" code between definitions (imports, constants, module-level statements) is grouped into its own chunk so nothing gets lost. Markdown files are split by heading boundaries (any line starting with `#` through `######`), so each section stays together. Both chunk types respect a configurable `max_chunk_size` (2000 characters by default); if a single block is too large, it's split further, falling back to raw character-level splitting for individual oversized lines. If a Python file fails to parse (`SyntaxError`), it's chunked with the Markdown chunker as a fallback instead of being skipped entirely.
 
 
+### Retrieval method
+
+Chunks are indexed using BM25 (via the `bm25s` library), a ranking algorithm that improves on plain TF-IDF by accounting for term-frequency saturation (repeating a word many times gives diminishing returns) and document-length normalization (long documents aren't unfairly favored just for containing more words). At query time, the question is tokenized the same way and matched against the index, returning the top-`k` chunks ranked by relevance score. The index (with the full corpus) is persisted to disk so it doesn't need to be rebuilt on every run.
 
 
+## Performance analysis
+
+Retrieval performance was measured using recall@k (with a 5% character-overlap threshold to count a retrieved chunk as a match), evaluated against the provided ground-truth datasets:
+
+Documentation questions: 82.00% recall@k (target: 75%)
+Code questions: 57.58% recall@k (target: 50%)
+
+Both results comfortably exceed the subject's targets, confirming the chunking + BM25 approach retrieves relevant context reliably for both natural-language documentation and source code.
+
+Generation performance, however, did not meet the intended latency target. On the available hardware (8GB RAM, no GPU), answer generation with Qwen3-0.6B took roughly 12–28 seconds per question, well above the ~2 second target. This is a hardware constraint rather than a pipeline design flaw: the model's own accuracy was verified to be correct (e.g., correctly answering "/v1/load_lora_adapter" for a LoRA-loading question), and an optimized inference engine (like GGUF/llama.cpp) would very likely resolve the latency gap — a trade-off documented further in "Design decisions" below.
 
 
-   
+## Design decisions
+
+**BM25 over dense embeddings/vector search**: BM25 was chosen because it's fast, needs no GPU or extra model to encode chunks, and works well on both natural language (docs) and source code identifiers, which matched the project's constraints well.
+
+**AST-based chunking over fixed-size chunking**: splitting by function/class/section boundaries (instead of just every N characters) keeps each chunk semantically complete, which matters both for retrieval relevance and for giving the LLM coherent context to reason over.
+
+**Pydantic for data validation**: used to enforce the structure of data passed between pipeline stages (questions, sources, answers), catching malformed data at runtime rather than letting errors surface silently deep in the pipeline.
+
+**Greedy decoding (`do_sample=False`) over sampling**: chosen because this is a factual QA task with one correct answer expected, not creative generation — determinism was preferred over variety.
+
+**Transformers + PyTorch over GGUF/llama.cpp**: I was aware that a quantized GGUF model running on llama.cpp would likely perform faster on my hardware, since it's a factory-optimized format built for CPU inference. I chose to complete the project with `transformers` + raw PyTorch instead, because it's the standard, reference implementation most commonly used for research, learning, and prototyping with new models, and I wanted to fully understand how the underlying model-loading and generation process works before optimizing further.
+
+**Reduced context size and generation length**: `max_chunk_size`, the context window passed to the LLM, and `max_new_tokens` were tuned down (e.g., context capped at 1500 characters, answers capped at ~60-80 tokens) specifically to reduce generation latency on constrained hardware, since the subject doesn't specify these values.
+
+
+## Challenges faced
+
+- **Low-RAM hardware (8GB total)**: initial attempts to use `device_map="auto"` caused the model to be offloaded to disk, making generation extremely slow (~196s per answer). Removing it and manually selecting `"cuda"`/`"cpu"` fixed that. A later attempt to speed things up further with dynamic int8 quantization gave a real 3x speedup in isolation (0.518s/token → 0.173s/token), but caused the full system to freeze when used in the actual pipeline, because holding both a float32 and int8 copy of the model spiked memory past what was available. The quantization was reverted, and the hardware limitation was documented instead of further engineered around.
+- **Environment instability**: WSL crashed outright mid-project (`Wsl/Service/E_UNEXPECTED`) and its own update tool failed too, requiring a manual MSI installer download and eventually a full machine restart to recover.
+- **File path mismatches**: the ground-truth dataset referenced file paths like `data/raw/vllm-0.10.1/docs/features/lora.md`, so the repo and datasets had to be placed at those exact relative paths for evaluation to work correctly.
+- **Environment pollution**: extracting files on Windows left behind `:Zone.Identifier` companion files throughout the repository and datasets, which had to be found and deleted.
+- **Tooling configuration**: `flake8` initially scanned third-party code inside `.venv`, fixed by excluding it via a `.flake8` config file.
+- **Indentation bugs**: incorrect indentation in `__main__.py` twice caused methods to be nested inside each other instead of being sibling CLI commands, diagnosed by inspecting the raw file with `sed` and fixed by rewriting the affected method with correct spacing.
+
+
+## Example usage
+
+Indexing the repository:
+```
+$ uv run python -m src index
+Indexado 20822 chunks en 4.66s -> data/output/index/chunks.json
+Indice BM25 guardado en data/output/index/bm25
+```
+
+Asking a single question directly:
+```
+$ uv run python -m src answer "What HTTP endpoint is used to dynamically load a LoRA adapter in vLLM?"
+{
+  "question_id": "ad-hoc",
+  "question": "What HTTP endpoint is used to dynamically load a LoRA adapter in vLLM?",
+  "retrieved_sources": [...],
+  "answer": "/v1/load_lora_adapter"
+}
+```
+
+Running the full evaluation against the ground-truth dataset:
+```
+$ uv run python -m src evaluate data/output/search_results/dataset_docs_public.json data/datasets/AnsweredQuestions/dataset_docs_public.json
+Preguntas evaluadas: 100
+Recall@k global: 82.00%
+  - easy: 91.30%
+  - medium: 78.50%
+  - hard: 65.00%
+```
+
+
+## Project Info
+| | |
+|---|---|
+| Language | Python |
+| School | 42 Madrid |
+| Status | ✅ Completed |
